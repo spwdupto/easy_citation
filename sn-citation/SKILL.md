@@ -78,18 +78,24 @@ $PY $SCRIPTS/sn_cite.py --file /path/to/draft.txt
 
 ---
 
-## 功能 2：向文献库添加论文
+## 功能 2：向本地文献库添加论文
 
 ```
+# 单篇
 $PY $SCRIPTS/sn_ingest.py --pdf /path/to/paper.pdf
 $PY $SCRIPTS/sn_ingest.py --pdf /path/to/paper.pdf --id 1706.03762
 $PY $SCRIPTS/sn_ingest.py --identifier 1706.03762    # arXiv ID，自动下载
+
+# 批量（用户已有文献积累时）
+$PY $SCRIPTS/sn_ingest.py --folder /path/to/papers/  # 整个文件夹所有 PDF
+$PY $SCRIPTS/sn_ingest.py --list arxiv_ids.txt       # 文本文件，每行一个 arXiv ID，# 开头为注释
 ```
 
 - 摄取含全文解析 + 分块 + 向量化，每篇约 1–5 分钟（取决于论文长度）。
+- 批量模式：单篇失败跳过继续，最终输出 `total / success / failed` 汇总。
 - 输出 JSON：`paper_id` / `title` / `chunk_count` 等；
   `metadata_incomplete: true` 表示元数据可信度较低，提醒用户核对作者/年份。
-- 扫描件或加密 PDF 会报 ValueError，如实告知用户。
+- 扫描件或加密 PDF 会报错，批量时跳过该篇，如实转告用户。
 
 ---
 

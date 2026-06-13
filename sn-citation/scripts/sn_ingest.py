@@ -1,24 +1,26 @@
 """
-sn_ingest.py — 向文献库添加论文（standalone）。
+sn_ingest.py — 向本地文献库添加论文（standalone）。
 
 用法：
     python sn_ingest.py --pdf paper.pdf
     python sn_ingest.py --pdf paper.pdf --id 2301.00001
     python sn_ingest.py --identifier 1706.03762        # arXiv，自动下载
-    python sn_ingest.py --identifier 10.1145/3292500   # DOI，查询元数据
+    python sn_ingest.py --folder /path/to/papers/      # 整个文件夹批量摄取
+    python sn_ingest.py --list dois.txt                # 从文件批量摄取 DOI/arXiv ID
 
 输出：stdout 纯 JSON（摄取结果），日志走 stderr。
 """
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from sn_cfg import setup_logging, load_config
-from sn_db import init_db, get_conn, upsert_paper, delete_paper_chunks, insert_chunk, paper_exists
+from sn_db import init_db, get_conn, upsert_paper, delete_paper_chunks, insert_chunk
 from sn_pdf import (
     extract_text_from_pdf, semantic_chunk, make_paper_id,
     valid_title, extract_doi, extract_arxiv_id, extract_year,
@@ -30,7 +32,6 @@ from sn_api import (
 setup_logging()
 logger = logging.getLogger(__name__)
 
-import re
 _ARXIV_ID_RE = re.compile(r"^\d{4}\.\d{4,5}(v\d+)?$")
 _DOI_RE = re.compile(r"^10\.\d{4,9}/")
 
@@ -45,10 +46,9 @@ def _is_doi(s: str) -> bool:
 
 def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
                   cfg, user_id: str) -> dict:
-    # Magic bytes 校验
+    """摄取 PDF 字节流，返回结果 dict，失败抛 ValueError。"""
     if file_bytes[:5] != b"%PDF-":
-        sys.stderr.write(f"[sn-citation] 不是有效的 PDF 文件: {filename}\n")
-        sys.exit(2)
+        raise ValueError(f"不是有效的 PDF 文件: {filename}")
 
     logger.info(f"解析 PDF: {filename}")
     text = extract_text_from_pdf(file_bytes)
@@ -64,14 +64,12 @@ def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
     metadata_source = "filename"
     metadata_confidence = 0.2
 
-    # 优先用 external_id 覆盖自动探测
     if external_id:
         if _is_arxiv_id(external_id):
             arxiv_id = external_id
         elif _is_doi(external_id):
             doi = external_id
 
-    # S2 查询（DOI / arXiv）
     s2_id = f"DOI:{doi}" if doi else (f"ARXIV:{arxiv_id}" if arxiv_id else None)
     if s2_id:
         logger.info(f"Semantic Scholar 查询: {s2_id}")
@@ -85,7 +83,6 @@ def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
             metadata_source = "s2_api"
             metadata_confidence = 0.95
 
-    # LLM 元数据提取（若 S2 未能获取标题）
     if not (title and valid_title(title)):
         logger.info("LLM 元数据提取")
         try:
@@ -101,13 +98,11 @@ def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
         except Exception as exc:
             logger.warning(f"LLM 元数据提取失败: {exc}")
 
-    # 文件名 fallback
     if not (title and valid_title(title)):
         title = Path(filename).stem
         metadata_source = "filename"
         metadata_confidence = 0.2
 
-    # year fallback（正则）
     if not year:
         year = extract_year(first_page)
 
@@ -116,13 +111,11 @@ def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
 
     logger.info(f"paper_id={paper_id!r}  title={title!r}  year={year}")
 
-    # ── 分块 ────────────────────────────────────────────────────────────────
     chunks = semantic_chunk(text)
     logger.info(f"分块数量: {len(chunks)}")
 
     conn = get_conn()
     try:
-        # 幂等：先删旧 chunks
         delete_paper_chunks(conn, paper_id)
         upsert_paper(
             conn, paper_id,
@@ -137,7 +130,6 @@ def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
         )
         conn.commit()
 
-        # ── Embedding + 写入 ─────────────────────────────────────────────────
         stored = 0
         for i, chunk in enumerate(chunks):
             paragraph_id = f"chunk_{i:03d}"
@@ -145,28 +137,15 @@ def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
             section = chunk["section"]
             token_count = chunk["token_count"]
 
-            # Chunk Head（无 section_summary 简化版）
-            head_text = (
-                f"[paper_id]: {paper_id}\n"
-                f"[paragraph_id]: {paragraph_id}\n"
-                f"[Section]: {section}\n"
-                f"[Content]: {raw_chunk}"
-            )
-
-            # Sliding window（前后各一 chunk）
             prev_text = chunks[i - 1]["text"] if i > 0 else ""
             next_text = chunks[i + 1]["text"] if i < len(chunks) - 1 else ""
             window_parts = [p for p in [prev_text, raw_chunk, next_text] if p]
-            window_head = head_text.replace(
-                f"[Content]: {raw_chunk}",
-                f"[Content]: {' '.join(window_parts)}"
-            )
 
             emb_vec = None
             if cfg.embedding.provider != "none":
                 try:
-                    vec = embed(f"[Content]: {raw_chunk}", cfg.embedding)
                     import numpy as np
+                    vec = embed(f"[Content]: {' '.join(window_parts)}", cfg.embedding)
                     emb_vec = np.array(vec, dtype=np.float32)
                 except Exception as exc:
                     logger.warning(f"chunk {i} embedding 失败: {exc}")
@@ -208,11 +187,56 @@ def ingest_bytes(file_bytes: bytes, filename: str, external_id: str | None,
         conn.close()
 
 
+def ingest_pdf_file(pdf_path: Path, external_id: str | None, cfg, user_id: str) -> dict:
+    """从本地文件路径摄取，失败抛异常。"""
+    if not pdf_path.is_file():
+        raise FileNotFoundError(f"文件不存在: {pdf_path}")
+    return ingest_bytes(pdf_path.read_bytes(), pdf_path.name, external_id, cfg, user_id)
+
+
+def ingest_identifier(identifier: str, cfg, user_id: str) -> dict:
+    """从 arXiv ID 摄取，失败抛异常。DOI 需配合 PDF 使用。"""
+    identifier = identifier.strip()
+    if not identifier or identifier.startswith("#"):
+        raise ValueError("空行或注释行，跳过")
+
+    if _is_arxiv_id(identifier):
+        logger.info(f"arXiv 下载: {identifier}")
+        file_bytes = download_arxiv_pdf(identifier)
+        if not file_bytes:
+            raise RuntimeError(f"arXiv PDF 下载失败: {identifier}")
+        return ingest_bytes(file_bytes, f"{identifier}.pdf", identifier, cfg, user_id)
+
+    if _is_doi(identifier):
+        raise ValueError(
+            f"DOI 摄取需要 PDF 文件，请用：python sn_ingest.py --pdf paper.pdf --id {identifier}"
+        )
+
+    raise ValueError(
+        f"无法识别标识符: {identifier!r}（支持 arXiv ID 如 1706.03762，"
+        "或 DOI 如 10.18653/v1/xxx）"
+    )
+
+
+def _batch_results(items: list[dict]) -> dict:
+    success = [r for r in items if r.get("status") == "ok"]
+    failed = [r for r in items if r.get("status") == "error"]
+    return {
+        "total": len(items),
+        "success": len(success),
+        "failed": len(failed),
+        "results": items,
+    }
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Scholar Navigator 文献摄取（standalone）")
+    parser = argparse.ArgumentParser(description="向本地文献库添加论文")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--pdf", help="本地 PDF 文件路径")
-    group.add_argument("--identifier", help="DOI 或 arXiv ID")
+    group.add_argument("--pdf", help="单篇本地 PDF 文件路径")
+    group.add_argument("--identifier", help="单个 DOI 或 arXiv ID")
+    group.add_argument("--folder", help="批量摄取：文件夹路径（处理所有 .pdf 文件）")
+    group.add_argument("--list", dest="id_list", metavar="FILE",
+                       help="批量摄取：文本文件路径（每行一个 arXiv ID，# 开头为注释）")
     parser.add_argument("--id", dest="external_id", help="与 --pdf 搭配的 DOI/arXiv ID")
     parser.add_argument("--user", default="default", help="用户隔离 ID")
     args = parser.parse_args()
@@ -220,48 +244,75 @@ def main() -> None:
     cfg = load_config()
     init_db()
 
+    # ── 单篇 PDF ──────────────────────────────────────────────────────────────
     if args.pdf:
-        pdf_path = Path(args.pdf)
-        if not pdf_path.is_file():
-            sys.stderr.write(f"[sn-citation] 文件不存在: {pdf_path}\n")
-            sys.exit(2)
-        file_bytes = pdf_path.read_bytes()
-        result = ingest_bytes(file_bytes, pdf_path.name, args.external_id, cfg, args.user)
-
-    else:
-        identifier = args.identifier.strip()
-
-        if _is_arxiv_id(identifier):
-            logger.info(f"arXiv 下载: {identifier}")
-            file_bytes = download_arxiv_pdf(identifier)
-            if not file_bytes:
-                sys.stderr.write(f"[sn-citation] arXiv PDF 下载失败: {identifier}\n")
-                sys.exit(1)
-            result = ingest_bytes(file_bytes, f"{identifier}.pdf", identifier, cfg, args.user)
-
-        elif _is_doi(identifier):
-            logger.info(f"DOI 元数据查询: {identifier}")
-            s2 = fetch_s2_metadata(f"DOI:{identifier}")
-            if not s2:
-                sys.stderr.write(
-                    f"[sn-citation] DOI 元数据查询失败: {identifier}\n"
-                    "提示：DOI 摄取需要同时提供 PDF，请用 --pdf paper.pdf --id {identifier}\n"
-                )
-                sys.exit(1)
-            sys.stderr.write(
-                f"[sn-citation] DOI 摄取需要 PDF 文件。请用：\n"
-                f"  python sn_ingest.py --pdf your_paper.pdf --id {identifier}\n"
-            )
+        try:
+            result = ingest_pdf_file(Path(args.pdf), args.external_id, cfg, args.user)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            sys.stderr.write(f"[sn-citation] 摄取失败: {exc}\n")
             sys.exit(1)
 
-        else:
-            sys.stderr.write(
-                f"[sn-citation] 无法识别标识符: {identifier!r}\n"
-                "支持格式：arXiv ID（如 1706.03762）或 DOI（如 10.18653/v1/xxx）\n"
-            )
+    # ── 单个标识符 ────────────────────────────────────────────────────────────
+    elif args.identifier:
+        try:
+            result = ingest_identifier(args.identifier, cfg, args.user)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            sys.stderr.write(f"[sn-citation] 摄取失败: {exc}\n")
+            sys.exit(1)
+
+    # ── 批量文件夹 ────────────────────────────────────────────────────────────
+    elif args.folder:
+        folder = Path(args.folder)
+        if not folder.is_dir():
+            sys.stderr.write(f"[sn-citation] 文件夹不存在: {folder}\n")
             sys.exit(2)
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+        pdf_files = sorted(folder.glob("*.pdf"))
+        if not pdf_files:
+            sys.stderr.write(f"[sn-citation] 文件夹内没有 PDF 文件: {folder}\n")
+            sys.exit(2)
+
+        logger.info(f"批量摄取：发现 {len(pdf_files)} 个 PDF")
+        items = []
+        for i, pdf_path in enumerate(pdf_files, 1):
+            logger.info(f"[{i}/{len(pdf_files)}] {pdf_path.name}")
+            try:
+                r = ingest_pdf_file(pdf_path, None, cfg, args.user)
+                items.append({"status": "ok", "file": pdf_path.name, **r})
+            except Exception as exc:
+                logger.error(f"  失败: {exc}")
+                items.append({"status": "error", "file": pdf_path.name, "error": str(exc)})
+
+        print(json.dumps(_batch_results(items), ensure_ascii=False, indent=2))
+
+    # ── 批量 ID 列表 ──────────────────────────────────────────────────────────
+    elif args.id_list:
+        list_path = Path(args.id_list)
+        if not list_path.is_file():
+            sys.stderr.write(f"[sn-citation] 文件不存在: {list_path}\n")
+            sys.exit(2)
+
+        lines = [l.strip() for l in list_path.read_text(encoding="utf-8").splitlines()]
+        identifiers = [l for l in lines if l and not l.startswith("#")]
+
+        if not identifiers:
+            sys.stderr.write(f"[sn-citation] 列表文件为空: {list_path}\n")
+            sys.exit(2)
+
+        logger.info(f"批量摄取：共 {len(identifiers)} 个标识符")
+        items = []
+        for i, ident in enumerate(identifiers, 1):
+            logger.info(f"[{i}/{len(identifiers)}] {ident}")
+            try:
+                r = ingest_identifier(ident, cfg, args.user)
+                items.append({"status": "ok", "identifier": ident, **r})
+            except Exception as exc:
+                logger.error(f"  失败: {exc}")
+                items.append({"status": "error", "identifier": ident, "error": str(exc)})
+
+        print(json.dumps(_batch_results(items), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
