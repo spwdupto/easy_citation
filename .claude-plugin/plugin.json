@@ -1,0 +1,19 @@
+{
+  "name": "sn-citation",
+  "description": "段落级学术引用匹配 skill — 为草稿文本从本地 PDF 文献库返回真实引用段落，含推理验证，拒绝幻觉",
+  "version": "1.0.0",
+  "author": {
+    "name": "spwdupto",
+    "url": "https://github.com/spwdupto/easy_citation"
+  },
+  "plugins": [
+    {
+      "name": "sn-citation",
+      "source": "sn-citation/SKILL.md",
+      "description": "为学术草稿找真实文献段落引用（中英文均支持）",
+      "category": "research",
+      "tags": ["citation", "academic", "rag", "literature", "引用", "文献"],
+      "strict": true
+    }
+  ]
+}

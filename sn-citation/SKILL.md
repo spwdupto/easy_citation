@@ -1,6 +1,25 @@
 ---
 name: sn-citation
 description: Find real, evidence-backed academic citations for draft text using a local RAG pipeline (claim extraction → hybrid recall → rerank → reasoning verification). Use when the user asks to find citations, references, or supporting literature for a paragraph/claim ("帮我找引用", "这段话有什么文献支持", "find citations for this"), to add papers (PDF / arXiv ID) to their citation library, or to list the library. Supports Chinese and English drafts.
+type: tool
+best_for:
+  - 学术论文写作找引用
+  - 给段落/主张寻找文献支撑
+  - 管理本地 PDF 文献库
+  - 中英文混合写作场景
+scenarios:
+  - 用户说"帮这段话找引用"或"find citations for this"
+  - 用户说"把这个 PDF 加入我的文献库"
+  - 用户说"摄取 arXiv 1706.03762"
+  - 用户说"我的文献库里有哪些论文"
+estimated_time: 引用匹配 30–90 秒；PDF 摄取 1–5 分钟/篇
+requires:
+  - ~/.sn-citation/config.json（API Key 配置）
+  - ~/.sn-citation/venv/（Python 虚拟环境，运行 install.py 创建）
+supported_providers:
+  llm: openai / anthropic / dashscope / deepseek / openai-compat
+  embedding: openai / dashscope / none
+  rerank: llm / dashscope / cohere
 ---
 
 # sn-citation — 段落级学术引用匹配
