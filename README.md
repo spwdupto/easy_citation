@@ -1,9 +1,9 @@
 # sn-citation — 段落级学术引用匹配 Skill
 
 把学术引用匹配能力装进 Claude Code：在**任意目录**说「帮这段话找引用」，
-Claude 即从你本地本地文献库返回**真实文献段落引用**（含推理验证，拒绝幻觉）。
+Claude 即从你本地文献库返回**真实文献段落引用**（含推理验证，拒绝幻觉）。
 
-**完全独立**：不依赖任何 SN 后端项目，你的 PDF 本地本地文献库存储在 `~/.sn-citation/`。
+**完全独立**：不依赖任何 SN 后端项目，你的 PDF 文献库存储在本地 `~/.sn-citation/`。
 
 ---
 
@@ -12,11 +12,9 @@ Claude 即从你本地本地文献库返回**真实文献段落引用**（含推
 | 说这句话 | Claude 会做什么 |
 |---|---|
 | "帮这段话找引用" / "find citations for this" | 提取主张 → 混合召回 → 重排 → 推理验证 → 返回真实引用 |
-| "把这个 PDF 加入我的本地文献库" | 解析 PDF → 分块 → 向量化 → 写入本地库 |
-| "把这个文件夹里的 PDF 都加入文献库" | 批量摄取整个文件夹（失败跳过，最后输出汇总） |
-| "摄取这个列表里的 arXiv 论文" | 读取 ID 列表文件，批量下载并摄取 |
+| "把这个 PDF 加入我的文献库" | 解析 PDF → 分块 → 向量化 → 写入本地库 |
 | "摄取 arXiv 1706.03762" | 自动下载 arXiv PDF 并摄取 |
-| "我的本地文献库里有哪些论文" | 列出本地文献库（按摄取时间倒序） |
+| "我的文献库里有哪些论文" | 列出文献库（按摄取时间倒序） |
 
 中英文草稿均支持（内置跨语言翻译）。
 
@@ -58,7 +56,7 @@ python skill/install.py
 **DashScope 用户（阿里云百炼）：**
 ```json
 {
-  "llm":       { "provider": "dashscope", "model": "qwen-turbo",        "api_key": "sk-..." },
+  "llm":       { "provider": "dashscope", "model": "qwen3.6-plus",      "api_key": "sk-..." },
   "embedding": { "provider": "dashscope", "model": "text-embedding-v3", "api_key": "sk-...", "dim": 1024 },
   "rerank":    { "provider": "dashscope", "model": "gte-rerank-v2",     "api_key": "sk-..." }
 }
@@ -84,19 +82,13 @@ python skill/install.py
 ## 使用流程
 
 ```
-# 方式一：整个文件夹批量摄取（已有文献积累时推荐）
-> 把 D:\papers\ 文件夹里的 PDF 都加入我的本地文献库
-
-# 方式二：从 arXiv ID 列表批量摄取
-> 用 D:\papers\arxiv_ids.txt 这个列表摄取论文
-
-# 方式三：单篇摄取
-> 把 D:\papers\attention.pdf 加入我的本地文献库
+# 先把论文加入文献库（按需重复）
+> 把 D:\papers\attention.pdf 加入我的文献库
 > 摄取 arXiv 2005.14165
 
 # 然后找引用
 > 帮我给这段话找引用：大语言模型在生成事实性内容时经常出现幻觉。
-> 查一下我的本地文献库里有哪些论文
+> 查一下我的文献库里有哪些论文
 ```
 
 ---
@@ -117,6 +109,33 @@ python skill/install.py
 
 ---
 
+## 效果评测
+
+引用匹配是一个 5 步 AI 流水线，每一步都可能引入误差。为量化检索质量，构建了
+**Golden Set**：30 条 claim（英文 ×10 / 中英混合 ×10 / 中文 ×10），每条标注其在文献库中
+应命中的目标论文，按检索排名计算 Precision / Recall / MRR。
+
+最近一次评测（2026-06-17，gte-rerank-v2，n=30，dashscope text-embedding-v3）：
+
+| 语种 | Precision@1 | Precision@3 | Recall@5 | MRR |
+|---|---|---|---|---|
+| **Overall (n=30)** | **0.90** | 0.93 | 0.93 | 0.91 |
+| English (n=10) | 1.00 | 1.00 | 1.00 | 1.00 |
+| Mixed (n=10) | 0.90 | 0.90 | 0.90 | 0.90 |
+| Chinese (n=10) | 0.80 | 0.90 | 0.90 | 0.83 |
+
+- **Precision@1 = 0.90**：90% 的查询，排名第一的引用就是正确文献。
+- **评测条件**：文献库共 22 篇论文，其中 21 篇即 Golden Set 语料、主题高度相近
+  （创造性 / 问题解决 / AI 测评），属于「难负样本」——衡量的是在一堆相似论文中
+  把正确那篇排到最前的能力，而非随机干扰下的检索。
+- **方法学**：只评估检索层（Step 1→3），不含 Step 4 推理验证（它是「是否支持」的
+  二次判断，不改变检索排名）。与检索质量评估惯例一致。
+- **可复现**：`python benchmarks/run_benchmark.py`（需先摄取 Golden 论文并配置 API Key）。
+  Golden Set 数据（`benchmarks/golden_set.json`）、评测脚本与原始结果
+  （`benchmarks/results/`）随仓库提供，可逐条核对。
+
+---
+
 ## 依赖与要求
 
 - Python 3.9+
@@ -129,5 +148,5 @@ python skill/install.py
 
 - **提示找不到配置**：确认 `~/.sn-citation/config.json` 存在且已填写 API Key
 - **摄取很慢**：向量化每个 chunk 都需要一次 API 调用，100 页 PDF 约 2–5 分钟
-- **找引用返回空**：本地文献库为空或无相关论文，先用摄取功能添加文献
+- **找引用返回空**：文献库为空或无相关论文，先用摄取功能添加文献
 - **依赖安装失败**：手动进入 venv 执行 `pip install pymupdf httpx numpy`

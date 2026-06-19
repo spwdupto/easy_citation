@@ -140,7 +140,7 @@ def main() -> None:
     print()
     print("常用配置示例：")
     print("  OpenAI 用户: provider=openai, model=gpt-4o-mini")
-    print("  DashScope 用户: llm provider=dashscope model=qwen-turbo,")
+    print("  DashScope 用户: llm provider=dashscope model=qwen3.6-plus,")
     print("                  embedding provider=dashscope model=text-embedding-v3 dim=1024")
     print("  Anthropic 用户: provider=anthropic model=claude-haiku-4-5-20251001")
     print("                  （embedding 需额外配置 OpenAI 或 DashScope，或设为 none）")
