@@ -6,7 +6,7 @@ sn_ingest.py — 向本地文献库添加论文（standalone）。
     python sn_ingest.py --pdf paper.pdf --id 2301.00001
     python sn_ingest.py --identifier 1706.03762        # arXiv，自动下载
     python sn_ingest.py --folder /path/to/papers/      # 整个文件夹批量摄取
-    python sn_ingest.py --list dois.txt                # 从文件批量摄取 DOI/arXiv ID
+    python sn_ingest.py --list arxiv_ids.txt       # 从文件批量摄取 arXiv ID
 
 输出：stdout 纯 JSON（摄取结果），日志走 stderr。
 """

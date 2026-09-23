@@ -9,7 +9,7 @@ sn-citation skill 安装脚本（standalone 版）。
   5. 复制 skill 文件到 ~/.claude/skills/sn-citation/
 
 用法：
-    python skill/install.py
+    python install.py
 """
 import json
 import shutil
@@ -23,8 +23,8 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-REPO_ROOT   = Path(__file__).resolve().parent.parent
-SKILL_SRC   = Path(__file__).resolve().parent / "sn-citation"
+REPO_ROOT = Path(__file__).resolve().parent
+SKILL_SRC  = REPO_ROOT / "sn-citation"
 SKILL_DEST  = Path.home() / ".claude" / "skills" / "sn-citation"
 DATA_DIR    = Path.home() / ".sn-citation"
 VENV_DIR    = DATA_DIR / "venv"

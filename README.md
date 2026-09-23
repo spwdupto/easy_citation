@@ -1,9 +1,9 @@
 # sn-citation — 段落级学术引用匹配 Skill
 
 把学术引用匹配能力装进 Claude Code：在**任意目录**说「帮这段话找引用」，
-Claude 即从你本地文献库返回**真实文献段落引用**（含推理验证，拒绝幻觉）。
+Claude 即从你的本地文献库返回**真实文献段落引用**（含推理验证，拒绝幻觉）。
 
-**完全独立**：不依赖任何 SN 后端项目，你的 PDF 文献库存储在本地 `~/.sn-citation/`。
+**完全独立**：不依赖任何 SN 后端项目，PDF 文献库存储在 `~/.sn-citation/`。
 
 ---
 
@@ -32,7 +32,7 @@ cd easy_citation
 ### 2. 运行安装脚本
 
 ```bash
-python skill/install.py
+python install.py
 ```
 
 安装脚本会：
@@ -139,8 +139,60 @@ python skill/install.py
 ## 依赖与要求
 
 - Python 3.9+
-- 任意一个 LLM API（OpenAI / Anthropic / DashScope / DeepSeek / 兼容 OpenAI 的接口）
-- 推荐同时配置 Embedding API（OpenAI 或 DashScope）以获得更好的召回质量
+- LLM：OpenAI / Anthropic / DashScope / DeepSeek / 兼容 OpenAI 的接口
+- Embedding：OpenAI / DashScope / none（纯 BM25，精度较低）
+- Rerank：LLM / DashScope / Cohere
+
+---
+
+## 输出示例
+
+```json
+{
+  "claim": "Large language models may hallucinate factual content.",
+  "citations": [
+    {
+      "title": "论文标题",
+      "authors": "作者",
+      "year": 2023,
+      "confidence": 0.85,
+      "raw_chunk": "支持该主张的文献段落中文展示文本……",
+      "raw_chunk_original": "Original English passage...",
+      "reason": "该段直接讨论了模型生成事实错误的问题。"
+    }
+  ]
+}
+```
+
+`citations` 为空表示本地文献库中没有强支撑证据，skill 不会编造引用。
+
+---
+
+## 适用边界
+
+- 只从用户已摄取的本地 PDF 文献库中找引用。
+- 文献库为空或无强支撑证据时返回空结果。
+- 扫描版、加密 PDF 或排版复杂 PDF 可能解析失败。
+- Anthropic 当前无 embedding API；使用 Claude 时建议搭配 OpenAI / DashScope embedding，或退化为 BM25。
+- 草稿 claim、候选段落和元数据可能发送给你配置的模型服务商。
+
+---
+
+## 卸载
+
+删除 skill：
+
+```bash
+rm -rf ~/.claude/skills/sn-citation
+rm -rf ~/.sn-citation/venv
+```
+
+如需同时删除配置和本地文献库，再删除：
+
+```bash
+rm -f ~/.sn-citation/config.json
+rm -f ~/.sn-citation/library.db
+```
 
 ---
 
@@ -150,3 +202,5 @@ python skill/install.py
 - **摄取很慢**：向量化每个 chunk 都需要一次 API 调用，100 页 PDF 约 2–5 分钟
 - **找引用返回空**：文献库为空或无相关论文，先用摄取功能添加文献
 - **依赖安装失败**：手动进入 venv 执行 `pip install pymupdf httpx numpy`
+
+详细配置、输出字段和排错规则见 `sn-citation/references/`。

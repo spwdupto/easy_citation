@@ -88,8 +88,8 @@ def load_config() -> Config:
     if not CONFIG_PATH.exists():
         sys.stderr.write(
             f"[sn-citation] 找不到配置文件：{CONFIG_PATH}\n"
-            "请先运行安装脚本：python skill/install.py\n"
-            "或手动创建配置文件，参考 skill/README.md。\n"
+            "请先运行安装脚本：python install.py\n"
+            "或手动创建配置文件，参考 sn-citation/references/config.md。\n"
         )
         sys.exit(2)
 
@@ -100,7 +100,12 @@ def load_config() -> Config:
     embed_raw = raw.get("embedding", {})
     rerank_raw = raw.get("rerank", {})
 
-    if not llm_raw.get("api_key") or llm_raw.get("api_key") == "YOUR_API_KEY_HERE":
+    placeholder_keys = {
+        "YOUR_API_KEY_HERE",
+        "YOUR_LLM_API_KEY_HERE",
+        "YOUR_EMBEDDING_API_KEY_HERE",
+    }
+    if not llm_raw.get("api_key") or llm_raw.get("api_key") in placeholder_keys:
         sys.stderr.write(
             f"[sn-citation] 请在 {CONFIG_PATH} 中填写 llm.api_key\n"
         )

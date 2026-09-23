@@ -1,6 +1,6 @@
 ---
 name: sn-citation
-description: Find real, evidence-backed academic citations for draft text using a local RAG pipeline (claim extraction → hybrid recall → rerank → reasoning verification). Use when the user asks to find citations, references, or supporting literature for a paragraph/claim ("帮我找引用", "这段话有什么文献支持", "find citations for this"), to add papers (PDF / arXiv ID) to their citation library, or to list the library. Supports Chinese and English drafts.
+description: 为学术草稿匹配真实文献引用；当用户要求找引用、添加 PDF/arXiv 文献或查看本地文献库时触发。基于本地 PDF 库检索、重排和推理验证，拒绝虚构引用。
 type: tool
 best_for:
   - 学术论文写作找引用
@@ -24,8 +24,28 @@ supported_providers:
 
 # sn-citation — 段落级学术引用匹配
 
-本 skill 在用户本地运行完整的 RAG 引用匹配流水线，为草稿文本返回**真实文献段落引用**。
-所有引用来自用户自己摄取的 PDF，带推理验证，拒绝幻觉。
+本 skill 在用户本地运行引用匹配流水线，为草稿文本返回**真实文献段落引用**。
+所有引用来自用户已摄取的 PDF，带推理验证；没有强支撑证据时不生成引用。
+
+## 输入规范
+
+- 找引用：提供草稿文本，或提供 UTF-8 文本文件。
+- 摄取 PDF：提供本地 PDF 路径，可选 DOI 或 arXiv ID。
+- 摄取 arXiv：提供 arXiv ID，例如 `1706.03762`。
+- 批量摄取：提供 PDF 文件夹，或每行一个 arXiv ID 的列表文件。
+- `--user` 默认使用 `default`；除非用户明确要求，不修改。
+
+## 兜底规则
+
+- 若 venv 不存在：提示运行 `python install.py`，不自行安装依赖。
+- 若配置不存在或 API Key 是占位符：提示填写配置，不执行 API 请求。
+- 若文献库为空：提示先摄取 PDF 或 arXiv 论文，不生成引用。
+- 若 citations 为空：说明没有强支撑证据，不编造引用。
+- 若 PDF 是扫描件或加密文件：告知无法解析；批量模式跳过该文件。
+- 若 API 请求失败：转述 stderr 中的真实错误，提示检查网络或 API Key。
+- 若结果包含 `degraded: true`：说明结果仅经过 rerank，置信度较低。
+
+详细配置见 `references/config.md`；输出字段见 `references/output-schema.md`；排错见 `references/troubleshooting.md`。
 
 ## 运行环境解析（执行任何命令前先做）
 
@@ -44,9 +64,9 @@ supported_providers:
 4. **环境未就绪时**（venv 或 config 缺失）：
    - 告知用户运行安装脚本：
      ```
-     python skill/install.py   # 若已 clone 仓库
+     python install.py   # 若已 clone 仓库
      ```
-   - 或参考 skill/README.md 手动安装。
+   - 或参考 `references/config.md` 手动配置。
    - 不要尝试自行安装依赖或修改配置。
 
 ---
